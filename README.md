@@ -10,7 +10,7 @@
 
 ## Thanks to
 > `sketch-photo2seq` directely borrows `sketch-rnn`'s encoder and decoder.<br> Therefore I needed pytorch version of `sketch-rnn. and directly borrow below repo.
-- [grantbey/Pytorch-SketchRNN](https://github.com/grantbey/PyTorch-SketchRNN),
+> - [grantbey/Pytorch-SketchRNN](https://github.com/grantbey/PyTorch-SketchRNN),
 
 > To build encoder and decoder for raster images, I directely borrowed below repo.
-- [AntixK/PyTorch-VAE](https://github.com/AntixK/PyTorch-VAE/blob/master/models/vanilla_vae.py)
+> - [AntixK/PyTorch-VAE](https://github.com/AntixK/PyTorch-VAE/blob/master/models/vanilla_vae.py)
