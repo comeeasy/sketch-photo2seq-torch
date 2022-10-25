@@ -29,6 +29,16 @@ svgwrite
 >   - Unzip the `ShoeV2` that is contained in Fine_Grained SBIR Datasets`
 >   - Move the all "REAL IMAGES" not "sketches" into `datasets/QMUL/shoes/photos` 
 
+## 🚀Training
+> 1. Write a config file. (Follow the `configs/defualt_config.yml`) and place the file into `configs`
+> 2. run the below code.<br>
+>   `python train.py --config="configs/your-config.yml"` <br>
+>   - e.g.
+>       `python train.py --config="configs/default_config.yml"`
+
+## 🖌 Sampling
+> - You can follow `sample.ipynb`
+
 ## Thanks to
 > `sketch-photo2seq` directely borrows `sketch-rnn`'s encoder and decoder.<br> Therefore I needed pytorch version of `sketch-rnn. and directly borrow below repo.
 > - [grantbey/Pytorch-SketchRNN](https://github.com/grantbey/PyTorch-SketchRNN),
