@@ -1,2 +1,4 @@
 # sketch-photo2seq-torch
-Implementation of sketch-photo2seq tensorflow
+
+| sketch-photo2seq-torch is duplicated version of original sketch-photo2seq (tensorflow v1)
+| 
