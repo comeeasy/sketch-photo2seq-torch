@@ -26,7 +26,7 @@ svgwrite
 > 2. QMUL-Shoes
 >   - Download the `train_svg_spa_png.h5`, `test_svg_spa_png.h5` files into `datasets/QMUL/shoes`.
 >   - Download the `Fine-Grained SBIR Datasets` (shoes and chairs)
->   - Unzip the `ShoeV2` that is contained in Fine_Grained SBIR Datasets`
+>   - Unzip the `ShoeV2` that is contained in `Fine_Grained SBIR Datasets`
 >   - Move the all "REAL IMAGES" not "sketches" into `datasets/QMUL/shoes/photos` 
 
 ## 🚀Training
@@ -45,3 +45,5 @@ svgwrite
 
 > To build encoder and decoder for raster images, I directely borrowed below repo.
 > - [AntixK/PyTorch-VAE](https://github.com/AntixK/PyTorch-VAE/blob/master/models/vanilla_vae.py)
+
+#### CGVM in SangMyung University
