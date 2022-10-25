@@ -24,9 +24,10 @@ svgwrite
 >  
 >   - Download the `Numpy .npz files` from this [link](https://github.com/googlecreativelab/quickdraw-dataset#sketch-rnn-quickdraw-dataset) and place the file into `datasets/QuickDraw/shoes/npz`
 > 2. QMUL-Shoes
->   - Download the `train_svg_spa_png.h5`, `test_svg_spa_png.h5` files into `datasets/QMUL/shoe`.
+>   - Download the `train_svg_spa_png.h5`, `test_svg_spa_png.h5` files into `datasets/QMUL/shoes`.
 >   - Download the `Fine-Grained SBIR Datasets` (shoes and chairs)
->   - Unzip the `ShoeV2` that is contained in Fine_Grained SBIR Datasets
+>   - Unzip the `ShoeV2` that is contained in Fine_Grained SBIR Datasets`
+>   - Move the all "REAL IMAGES" not "sketches" into `datasets/QMUL/shoes/photos` 
 
 ## Thanks to
 > `sketch-photo2seq` directely borrows `sketch-rnn`'s encoder and decoder.<br> Therefore I needed pytorch version of `sketch-rnn. and directly borrow below repo.
