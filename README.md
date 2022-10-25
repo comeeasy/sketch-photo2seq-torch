@@ -7,6 +7,26 @@
 > Unfortunately, The code was written in tensorflow v1.<br>
 > To enjoy advances of newest version of pytorch, I produce a duplication of [sketch-photo2seq](https://github.com/MarkMoHR/sketch-photo2seq).
 
+## Environments
+```python
+torch==1.10.1
+torchvision==0.11.2
+numpy==1.22.3
+matplotlib
+PIL
+svgwrite
+```
+###### Few packages are used. Just install.
+
+## Datasets
+> We need **two** datasets. 
+> 1. QuickDraw
+>  
+>   - Download the `Numpy .npz files` from this [link](https://github.com/googlecreativelab/quickdraw-dataset#sketch-rnn-quickdraw-dataset) and place the file into `datasets/QuickDraw/shoes/npz`
+> 2. QMUL-Shoes
+>   - Download the `train_svg_spa_png.h5`, `test_svg_spa_png.h5` files into `datasets/QMUL/shoe`.
+>   - Download the `Fine-Grained SBIR Datasets` (shoes and chairs)
+>   - Unzip the `ShoeV2` that is contained in Fine_Grained SBIR Datasets
 
 ## Thanks to
 > `sketch-photo2seq` directely borrows `sketch-rnn`'s encoder and decoder.<br> Therefore I needed pytorch version of `sketch-rnn. and directly borrow below repo.
