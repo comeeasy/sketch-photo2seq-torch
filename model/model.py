@@ -279,10 +279,12 @@ class Model():
         self.wKL        = config.hypers["wKL"]
         self.device     = config.device
         self.Nz         = config.hypers["Nz"]
-        self.quick_draw_save = config.train["quick_draw"]["weights_save"]
-        self.qmul_save  = config.train["qmul"]["weights_save"]
-        self.quick_draw_resume = config.train["quick_draw"]["resume"]
-        self.qmul_resume = config.train["qmul"]["resume"]
+        self.quick_draw_save      = config.train["quick_draw"]["weights_save"]
+        self.quick_draw_resume    = config.train["quick_draw"]["resume"]
+        self.quick_draw_save_iter = config.train["quick_draw"]["save_iter"]
+        self.qmul_save      = config.train["qmul"]["weights_save"]
+        self.qmul_resume    = config.train["qmul"]["resume"]
+        self.qmul_save_iter = config.train["qmul"]["save_iter"]
         
         self.seq_enc = SeqEncoder(config).to(self.device)
         self.seq_dec = SeqDecoder(config).to(self.device)
@@ -323,7 +325,7 @@ class Model():
 
         z, self.mu, self.sigma = self.seq_enc(batch, self.batch_size)
 
-        sos = Variable(torch.stack([torch.Tensor([0, 0, 1, 0, 0])] * self.batch_size).cuda()).unsqueeze(0)
+        sos = Variable(torch.stack([torch.Tensor([0, 0, 1, 0, 0])] * self.batch_size).to(self.device)).unsqueeze(0)
         batch_init = torch.cat([sos, batch], 0)
         z_stack = torch.stack([z] * (self.Nmax + 1))
         inputs = torch.cat([batch_init, z_stack], 2)
@@ -353,13 +355,15 @@ class Model():
         self.seq_enc_optim.step()
         self.seq_dec_optim.step()
 
-        if epoch%500 == 0:
+        if epoch % 500 == 0:
             self.seq_enc_optim = self.lr_decay(self.seq_enc_optim)
             self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
 
-        if epoch % 10000 == 0:
-            pt_name = f"qd_seq_dec_{epoch}.pt"
-            torch.save(self.seq_dec.state_dict(), os.path.join(self.quick_draw_save, pt_name))
+        if epoch % self.quick_draw_save_iter == 0:
+            seq_enc_name = f"seq_enc_{epoch}.pt"
+            seq_dec_name = f"seq_dec_{epoch}.pt"
+            torch.save(self.seq_enc.state_dict(), os.path.join(self.quick_draw_save, seq_enc_name))
+            torch.save(self.seq_dec.state_dict(), os.path.join(self.quick_draw_save, seq_dec_name))
 
         # todo save
 
@@ -466,11 +470,15 @@ class Model():
             self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
             self.pix_enc_optim = self.lr_decay(self.pix_enc_optim)
             self.pix_dec_optim = self.lr_decay(self.pix_dec_optim)
-        
-            pix_enc_name = f"pic_enc_{epoch}.pt"
+        if epoch % self.qmul_save_iter == 0:
+            seq_enc_name = f"seq_enc_{epoch}.pt"
             seq_dec_name = f"seq_dec_{epoch}.pt"
-            torch.save(self.pix_enc.state_dict(), os.path.join(self.qmul_save, pix_enc_name))
+            pix_enc_name = f"pix_enc_{epoch}.pt"
+            pix_dec_name = f"pix_dec_{epoch}.pt"
+            torch.save(self.seq_enc.state_dict(), os.path.join(self.qmul_save, seq_enc_name))
             torch.save(self.seq_dec.state_dict(), os.path.join(self.qmul_save, seq_dec_name))
+            torch.save(self.pix_enc.state_dict(), os.path.join(self.qmul_save, pix_enc_name))
+            torch.save(self.pix_dec.state_dict(), os.path.join(self.qmul_save, pix_dec_name))
 
         # todo conditional generation
         # This uses z from a trained model encoder, but feeds a sample image into the decoder

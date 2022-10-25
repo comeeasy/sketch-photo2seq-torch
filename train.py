@@ -4,7 +4,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 import argparse
-
+import os, time
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -24,9 +24,10 @@ def main():
     args = get_args()
     config = Config(args.config)
     
-    QuickDraw_epochs = config.train["quick_draw_epochs"]
-    QMUL_epochs      = config.train["qmul_epochs"]
+    QuickDraw_epochs = config.train["quick_draw"]["epochs"]
+    QMUL_epochs      = config.train["qmul"]["epochs"]
     tensorboard_log  = config.train["tensorboard_log"]
+    tensorboard_log  = os.path.join(tensorboard_log, time.strftime('%Y%m%H%M', time.localtime()))
 
     model = Model(config)
     quick_draw_loader = QuickDrawLoader(config)
