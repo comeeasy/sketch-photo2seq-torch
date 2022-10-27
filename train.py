@@ -37,13 +37,13 @@ def main():
         # pre-training
         if config.train["quick_draw"]["resume"]: start_epoch = config.train["quick_draw"]["start_epoch"]
         else: start_epoch = 1   
-        for epoch in tqdm(range(start_epoch, QuickDraw_epochs+start_epoch)):
+        for epoch in tqdm(range(start_epoch, QuickDraw_epochs + start_epoch)):
             model.quick_draw_train(quick_draw_loader, epoch, writer)
         
         # train
         if config.train["qmul"]["resume"]: start_epoch = config.train["qmul"]["start_epoch"]
         else: start_epoch = 1   
-        for epoch in tqdm(range(start_epoch, QMUL_epochs+start_epoch)):
+        for epoch in tqdm(range(start_epoch, QMUL_epochs + start_epoch)):
             model.qmul_train(qmul_loader, epoch, writer)
     
 

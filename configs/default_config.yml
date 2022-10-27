@@ -5,15 +5,28 @@ hypers:
   dropout: 0.9
   M: 20
   max_seq_length: 200
-  lr: 0.0001
+  lr: 0.001
   eta_min: 0.01
-  batch_size: 256
+  batch_size: 100
   R: 0.99995
   KL_min: 0.2
-  wKL: 0.01
-  lr_decay: 0.9999
+  wKL: 1.
+  lr_decay: 0.999
   min_lr: 0.00001
   grad_clip: 1.
+  in_channels: 3
+  pix_enc_hdims:
+    - 32
+    - 64
+    - 128
+    - 256
+    - 512
+  pix_dec_hdims:
+    - 512
+    - 256
+    - 128
+    - 64
+    - 32
 
 data:
   quick_draw: "/home/joono/MinLab/sketch-photo2seq-torch/datasets/QuickDraw/shoes/npz/shoe.npz"
@@ -21,17 +34,17 @@ data:
   qmul_test : "/home/joono/MinLab/sketch-photo2seq-torch/datasets/QMUL/shoes/test_svg_sim_spa_png.h5"
 
 train:
-  tensorboard_log: "runs/photo2seq-2022-10-25-12"
+  tensorboard_log: "runs/"
 
   quick_draw:
-    epochs: 40000
-    save_iter: 10000
-    weights_save: "./weights/QuickDraw"     # path to directory in which models are saved
-    resume: False
-    start_epoch: 20000  # e.g.) load weights/QuickDraw/seq_enc_{start_epoch}.pt
+    epochs: 0
+    save_iter: 5000
+    weights_save: "./weights/QuickDraw/2022-10-27-2027-Good"     # path to directory in which models are saved
+    resume: True
+    start_epoch: 20000
   qmul:
     epochs: 10000
-    save_iter: 1000     
+    save_iter: 100    
     weights_save: "./weights/QMUL"
     resume: False
     start_epoch:        # e.g.) load weights/QMUL/seq_enc_{start_epoch}.pt

@@ -48,9 +48,12 @@ class QuickDrawLoader():
         
         self.data = np.load(self.datafile, encoding = 'latin1', allow_pickle=True)        
         self.data = self.data['train']
-        self.data = purify(self,self.data)
-        self.data = normalize(self,self.data)
-        self.Nmax = max_size(self,self.data)
+        # self.data = purify(self, self.data)
+        # self.data = normalize(self, self.data)
+        # self.Nmax = max_size(self, self.data)
+        self.data = purify(self, self.data)
+        self.data = normalize(self, self.data)
+        self.Nmax = max_size(self, self.data)
 
     def get_batch(self, batch_size):
         idxs = np.random.choice(len(self.data),batch_size)
@@ -147,7 +150,7 @@ class QMULLoader():
         self.transforms = transforms.Compose([
             transforms.ToTensor(),
             transforms.Resize((224, 224)),
-            transforms.Normalize([0.5, 0.5, 0.5], [1., 1., 1.]),
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
         ])
         
         self.data, self.image_base_name = load_h5(self.datafile)    

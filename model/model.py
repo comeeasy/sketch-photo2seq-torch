@@ -103,7 +103,7 @@ class SeqDecoder(nn.Module):
         if hidden_cell is None:
             # Feed z into the linear layer, apply a tanh activation, then split along the second dimension
             # Since the size is 2*params.decoder_hidden_size, splitting is by params.decoder_hidden_size divides it into two parts
-            hidden,cell = torch.split(F.tanh(self.hc(z)), self.decoder_hidden_size, 1)
+            hidden,cell = torch.split(torch.tanh(self.hc(z)), self.decoder_hidden_size, 1)
             # Now create a tuple, add in an extra dimension in the first position and ensure that it's contiguous in memory
             hidden_cell = (hidden.unsqueeze(0).contiguous(),cell.unsqueeze(0).contiguous())
 
@@ -173,22 +173,21 @@ class SeqDecoder(nn.Module):
 """
  
 class PixEncoder(nn.Module):
-    def __init__(self, in_channels=3, hidden_dims=None, Nz=128) -> None:
+    def __init__(self, config) -> None:
         super(PixEncoder, self).__init__()
         
-        self.latent_dim = Nz
-        self.hidden_dims = hidden_dims
+        self.in_channels    = config.hypers["in_channels"]
+        self.latent_dim     = config.hypers["Nz"]
+        self.hidden_dims    = config.hypers["pix_enc_hdims"]
         
-        if hidden_dims is None:
-            self.hidden_dims = [32, 64, 128, 256, 512]
-
         modules = []
+        in_channels = self.in_channels
         for h_dim in self.hidden_dims:
             modules.append(
                 nn.Sequential(
                     nn.Conv2d(in_channels, out_channels=h_dim,
                               kernel_size=3, stride=2, padding=1),
-                    nn.BatchNorm2d(h_dim),
+                    nn.InstanceNorm2d(h_dim),
                     nn.LeakyReLU(inplace=True)
                 )
             )
@@ -214,29 +213,27 @@ class PixEncoder(nn.Module):
            
 
 class PixDecoder(nn.Module):
-    def __init__(self, hidden_dims=None, Nz=128, out_channels=3) -> None:
+    def __init__(self, config) -> None:
         super(PixDecoder, self).__init__()
         
-        self.latent_dim = Nz
+        self.out_channels   = config.hypers["in_channels"]
+        self.latent_dim     = config.hypers["Nz"]
+        self.hidden_dims    = config.hypers["pix_dec_hdims"]
         
-        if hidden_dims is None:
-            hidden_dims = [512, 256, 128, 64, 32]
-        
-        self.decoder_input = nn.Linear(self.latent_dim, hidden_dims[0] * 7 * 7)
+        self.decoder_input = nn.Linear(self.latent_dim, self.hidden_dims[0] * 7 * 7)
         
         modules = []
-        for i in range(len(hidden_dims)-1):
+        for i in range(len(self.hidden_dims)-1):
             modules.append(
                 nn.Sequential(
                     nn.ConvTranspose2d(
-                        hidden_dims[i],
-                        hidden_dims[i+1],
-                        kernel_size=3,
+                        self.hidden_dims[i],
+                        self.hidden_dims[i+1],
+                        kernel_size=4,
                         stride=2,
                         padding=1,
-                        output_padding=1
                     ),
-                    nn.BatchNorm2d(hidden_dims[i+1]),
+                    nn.InstanceNorm2d(self.hidden_dims[i+1]),
                     nn.LeakyReLU(inplace=True)    
                 )
             )
@@ -245,22 +242,22 @@ class PixDecoder(nn.Module):
         
         self.final_layer = nn.Sequential(
             nn.ConvTranspose2d(
-                hidden_dims[-1], hidden_dims[-1],
+                self.hidden_dims[-1], self.hidden_dims[-1],
                 kernel_size=3, stride=2, padding=1, output_padding=1
             ),
-            nn.BatchNorm2d(hidden_dims[-1]),
+            nn.InstanceNorm2d(self.hidden_dims[-1]),
             nn.LeakyReLU(inplace=True),
-            nn.Conv2d(hidden_dims[-1], out_channels=out_channels,
+            nn.Conv2d(self.hidden_dims[-1], out_channels=self.out_channels,
                       kernel_size=3, padding=1),
-            nn.Tanh()
         )
 
         
     def forward(self, z):
         out = self.decoder_input(z)
-        out = out.view(-1, 512, 7, 7)
+        out = out.view(-1, self.hidden_dims[0], 7, 7) # input images size: (224, 224)
         out = self.decoder(out)
         out = self.final_layer(out)
+        out = torch.tanh(out)
         
         return out
 
@@ -288,8 +285,8 @@ class Model():
         
         self.seq_enc = SeqEncoder(config).to(self.device)
         self.seq_dec = SeqDecoder(config).to(self.device)
-        self.pix_enc = PixEncoder().to(self.device)
-        self.pix_dec = PixDecoder().to(self.device)
+        self.pix_enc = PixEncoder(config).to(self.device)
+        self.pix_dec = PixDecoder(config).to(self.device)
         
         if self.quick_draw_resume:
             start_epoch = config.train["quick_draw"]["start_epoch"]
@@ -308,8 +305,8 @@ class Model():
             self.pix_enc.load_state_dict(torch.load(pix_enc_path))
             self.pix_dec.load_state_dict(torch.load(pix_dec_path))
         
-        self.seq_enc_optim = optim.Adam(self.seq_enc.parameters(),self.lr)
-        self.seq_dec_optim = optim.Adam(self.seq_dec.parameters(),self.lr)
+        self.seq_enc_optim = optim.Adam(self.seq_enc.parameters(), self.lr)
+        self.seq_dec_optim = optim.Adam(self.seq_dec.parameters(), self.lr)
         self.pix_enc_optim = optim.Adam(self.pix_enc.parameters(), self.lr)
         self.pix_dec_optim = optim.Adam(self.pix_dec.parameters(), self.lr)
         
@@ -331,13 +328,12 @@ class Model():
         inputs = torch.cat([batch_init, z_stack], 2)
 
         self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, self.rho_xy, self.q, _, _ = self.seq_dec(inputs, z, self.batch_size)
-
         mask, dx, dy, p = dataloader.get_target(batch,lengths)
 
         self.seq_enc_optim.zero_grad()
         self.seq_dec_optim.zero_grad()
 
-        self.eta_step = 1 - (1 - self.eta_min) * self.R
+        self.eta_step = 1 - (1 - self.eta_step) * self.R
 
         LKL = self.kullback_leibler_loss()
         LR = self.reconstruction_loss(mask, dx, dy, p)
@@ -349,15 +345,14 @@ class Model():
 
         loss.backward()
 
-        nn.utils.clip_grad_norm(self.seq_enc.parameters(), self.grad_clip)
-        nn.utils.clip_grad_norm(self.seq_dec.parameters(), self.grad_clip)
+        nn.utils.clip_grad_norm_(self.seq_enc.parameters(), self.grad_clip)
+        nn.utils.clip_grad_norm_(self.seq_dec.parameters(), self.grad_clip)
 
         self.seq_enc_optim.step()
         self.seq_dec_optim.step()
 
-        if epoch % 500 == 0:
-            self.seq_enc_optim = self.lr_decay(self.seq_enc_optim)
-            self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
+        self.seq_enc_optim = self.lr_decay(self.seq_enc_optim)
+        self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
 
         if epoch % self.quick_draw_save_iter == 0:
             seq_enc_name = f"seq_enc_{epoch}.pt"
@@ -438,12 +433,12 @@ class Model():
         self.pix_enc_optim.zero_grad()
         self.pix_dec_optim.zero_grad()
 
-        self.eta_step = 1 - (1 - self.eta_min) * self.R
+        self.eta_step = 1 - (1 - self.eta_step) * self.R
 
         L_KL = L_s2s_KL + L_p2p_KL + L_s2p_KL + L_p2s_KL
         L_shortcut = L_s2s_R + L_p2p_R
-        L_R = L_s2p_R + L_p2s_R
-        loss = L_R + L_shortcut + L_KL
+        L_Reconstruction = L_s2p_R + L_p2s_R
+        loss = L_Reconstruction + L_shortcut + L_KL
 
         writer.add_scalar("QMUL/Total/Loss", loss, epoch)
         writer.add_scalar("QMUL/KL/s2s", L_s2s_KL, epoch)
@@ -454,6 +449,8 @@ class Model():
         writer.add_scalar("QMUL/Reconstruction/p2p", L_p2p_R, epoch)
         writer.add_scalar("QMUL/Reconstruction/s2p", L_s2p_R, epoch)
         writer.add_scalar("QMUL/Reconstruction/p2s", L_p2s_R, epoch)
+        writer.add_scalar("QMUL/KL_weigth", self.wKL * self.eta_step, epoch)
+        writer.add_scalar("QMUL/Learning Rate", self.lr, epoch)
         
         loss.backward()
 
@@ -465,11 +462,13 @@ class Model():
         self.pix_enc_optim.step()
         self.pix_dec_optim.step()
 
-        if epoch%500 == 0:
-            self.seq_enc_optim = self.lr_decay(self.seq_enc_optim)
-            self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
-            self.pix_enc_optim = self.lr_decay(self.pix_enc_optim)
-            self.pix_dec_optim = self.lr_decay(self.pix_dec_optim)
+        self.seq_enc_optim = self.lr_decay(self.seq_enc_optim)
+        self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
+        self.pix_enc_optim = self.lr_decay(self.pix_enc_optim)
+        self.pix_dec_optim = self.lr_decay(self.pix_dec_optim)
+        if self.lr > self.min_lr:
+            self.lr *= self._lr_decay
+        
         if epoch % self.qmul_save_iter == 0:
             seq_enc_name = f"seq_enc_{epoch}.pt"
             seq_dec_name = f"seq_dec_{epoch}.pt"
@@ -510,7 +509,7 @@ class Model():
 
     def reconstruction_loss(self, mask, dx, dy, p):
         pdf = self.bivariate_normal_pdf(dx, dy)
-        LS = -torch.sum(mask * torch.log(1e-5 + torch.sum(self.pi * pdf, 2))) / float(self.Nmax * self.batch_size)
+        LS = -torch.sum(mask * torch.log(1e-12 + torch.sum(self.pi * pdf, 2))) / float(self.Nmax * self.batch_size)
         LP = -torch.sum(p * torch.log(self.q)) / float(self.Nmax * self.batch_size)
         return LS + LP
 
