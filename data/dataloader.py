@@ -48,9 +48,6 @@ class QuickDrawLoader():
         
         self.data = np.load(self.datafile, encoding = 'latin1', allow_pickle=True)        
         self.data = self.data['train']
-        # self.data = purify(self, self.data)
-        # self.data = normalize(self, self.data)
-        # self.Nmax = max_size(self, self.data)
         self.data = purify(self, self.data)
         self.data = normalize(self, self.data)
         self.Nmax = max_size(self, self.data)
@@ -106,6 +103,8 @@ class QMULLoader():
         self.M = config.hypers["M"]
         self.device = config.device
         self.qmul_image_path = os.path.join("datasets", "QMUL", "shoes", "photos")
+        self.img_size = config.hypers["img_size"]
+        self.img_crop = config.hypers["img_crop"]
 
         def purify(self, strokes):
             data = []
@@ -149,7 +148,8 @@ class QMULLoader():
         
         self.transforms = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Resize((224, 224)),
+            transforms.Resize((self.img_size, self.img_size)),
+            transforms.CenterCrop((self.img_crop, self.img_crop)),
             transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
         ])
         

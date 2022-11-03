@@ -12,8 +12,26 @@ from torch import optim
 import torch.nn.functional as F
 
 import numpy as np
-from data.dataloader import *
+from data.custom_dataloader import *
 
+import os
+from tqdm import tqdm
+
+
+def _init_weights(module):
+    if isinstance(module, nn.Conv2d):
+        nn.init.xavier_normal_(module.weight.data, 0.0, 0.02)
+        if module.bias is not None:
+            module.bias.data.zero_()
+    if isinstance(module, nn.ConvTranspose2d):
+        nn.init.xavier_normal_(module.weight.data, 0.0, 0.02)
+        if module.bias is not None:
+            module.bias.data.zero_()
+    elif isinstance(module, nn.BatchNorm2d):
+        nn.init.xavier_normal_(module.weight.data, 1.0, 0.02)
+        nn.init.constant_(module.bias.data, 0)
+    elif isinstance(module, nn.Linear):
+        nn.init.xavier_normal_(module.weight.data, 0.0)
 
 class SeqEncoder(nn.Module):
     def __init__(self, config):
@@ -28,6 +46,12 @@ class SeqEncoder(nn.Module):
         self.lstm = nn.LSTM(input_size = 5, hidden_size = self.encoder_hidden_size, bias=True, dropout=self.dropout, bidirectional=True)
         self.mu = nn.Linear(2 * self.encoder_hidden_size, self.Nz)
         self.sigma = nn.Linear(2 * self.encoder_hidden_size, self.Nz)
+
+        _init_weights(self.mu)
+        _init_weights(self.sigma)
+        # https://gist.github.com/zxjzxj9/3df2ecb73e511abbf805b4dfb317965e
+        for name, param in self.lstm.named_parameters():
+            if name.startswith("weight"): nn.init.orthogonal_(param)
 
     def forward(self,inputs,batch_size,hidden_cell=None):
         if hidden_cell is None:
@@ -98,6 +122,12 @@ class SeqDecoder(nn.Module):
         # Thus, there are 6*M+3 parameters that need to be modelled for each line in a drawing.
         # Note that M is a hyperparameter.
         self.fc_y = nn.Linear(self.decoder_hidden_size, 6 * self.M + 3)
+
+        _init_weights(self.hc)
+        _init_weights(self.fc_y)
+        # https://gist.github.com/zxjzxj9/3df2ecb73e511abbf805b4dfb317965e
+        for name, param in self.lstm.named_parameters():
+            if name.startswith("weight"): nn.init.orthogonal_(param)
 
     def forward(self, inputs, z, batch_size, hidden_cell=None):
         if hidden_cell is None:
@@ -261,6 +291,106 @@ class PixDecoder(nn.Module):
         
         return out
 
+class PixEncoder2(nn.Module):
+    def __init__(self, config) -> None:
+        super(PixEncoder2, self).__init__()
+        
+        self.in_channels    = config.hypers["in_channels"]
+        self.latent_dim     = config.hypers["Nz"]
+        self.hidden_dims    = config.hypers["pix_enc_hdims"]
+        
+        modules = []
+        in_channels = self.in_channels
+        for h_dim in self.hidden_dims:
+            modules.append(
+                nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels=h_dim,
+                              kernel_size=3, stride=1, padding=1),
+                    nn.MaxPool2d(2, 2),
+                    nn.InstanceNorm2d(h_dim),
+                    nn.LeakyReLU(inplace=True)
+                )
+            )
+            in_channels = h_dim
+        self.fc = nn.Sequential(
+            nn.Linear(self.hidden_dims[-1] * 7 * 7, 512),
+            nn.Dropout(0.8),
+        )
+        
+        self.encoder = nn.Sequential(*modules)
+        self.fc_mu = nn.Linear(512, self.latent_dim)
+        self.fc_var = nn.Linear(512, self.latent_dim)
+
+        _init_weights(self.encoder)
+        _init_weights(self.fc)
+        _init_weights(self.fc_mu)
+        _init_weights(self.fc_var)
+        
+    def reparameterize(self, mu, std):
+        eps = torch.randn_like(std)
+        return eps * std + mu
+    
+    def forward(self, x):
+        out = self.encoder(x)
+        out = out.view(-1, self.hidden_dims[-1] * 7 * 7)
+        h = self.fc(out)
+        mu, logvar = self.fc_mu(h), self.fc_var(h)
+        std = torch.exp(0.5 * logvar)        
+        z = self.reparameterize(mu, std)
+        return z, mu, std
+           
+
+class PixDecoder2(nn.Module):
+    def __init__(self, config) -> None:
+        super(PixDecoder2, self).__init__()
+        
+        self.out_channels   = config.hypers["in_channels"]
+        self.latent_dim     = config.hypers["Nz"]
+        self.hidden_dims    = config.hypers["pix_dec_hdims"]
+        
+        self.decoder_input = nn.Sequential(
+            nn.Linear(self.latent_dim, self.hidden_dims[0] * 7 * 7),
+            nn.Dropout(0.8),
+        )
+        
+        modules = []
+        for i in range(len(self.hidden_dims)-1):
+            modules.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(
+                        self.hidden_dims[i],
+                        self.hidden_dims[i+1],
+                        kernel_size=4,
+                        stride=2,
+                        padding=1,
+                    ),
+                    nn.InstanceNorm2d(self.hidden_dims[i+1]),
+                    nn.LeakyReLU(inplace=True)    
+                )
+            )
+            
+        self.decoder = nn.Sequential(*modules)
+        
+        self.final_layer = nn.Sequential(
+            nn.ConvTranspose2d(
+                self.hidden_dims[-1], self.out_channels,
+                kernel_size=4, stride=2, padding=1
+            ),
+        )
+
+        _init_weights(self.decoder_input)
+        _init_weights(self.decoder)
+        _init_weights(self.final_layer)
+        
+    def forward(self, z):
+        out = self.decoder_input(z)
+        out = out.view(-1, self.hidden_dims[0], 7, 7) # input images size: (224, 224)
+        out = self.decoder(out)
+        out = self.final_layer(out)
+        out = torch.tanh(out)
+        
+        return out
+
 class Model():
     def __init__(self, config):
         
@@ -285,8 +415,8 @@ class Model():
         
         self.seq_enc = SeqEncoder(config).to(self.device)
         self.seq_dec = SeqDecoder(config).to(self.device)
-        self.pix_enc = PixEncoder(config).to(self.device)
-        self.pix_dec = PixDecoder(config).to(self.device)
+        self.pix_enc = PixEncoder2(config).to(self.device)
+        self.pix_dec = PixDecoder2(config).to(self.device)
         
         if self.quick_draw_resume:
             start_epoch = config.train["quick_draw"]["start_epoch"]
@@ -296,10 +426,10 @@ class Model():
             self.seq_dec.load_state_dict(torch.load(seq_dec_path))
         if self.qmul_resume:
             start_epoch = config.train["qmul"]["start_epoch"]
-            seq_enc_path = os.path.join(self.quick_draw_save, f"seq_enc_{start_epoch}.pt")
-            seq_dec_path = os.path.join(self.quick_draw_save, f"seq_dec_{start_epoch}.pt")
-            pix_enc_path = os.path.join(self.quick_draw_save, f"pix_enc_{start_epoch}.pt")
-            pix_dec_path = os.path.join(self.quick_draw_save, f"pix_dec_{start_epoch}.pt")
+            seq_enc_path = os.path.join(self.qmul_save, f"seq_enc_{start_epoch}.pt")
+            seq_dec_path = os.path.join(self.qmul_save, f"seq_dec_{start_epoch}.pt")
+            pix_enc_path = os.path.join(self.qmul_save, f"pix_enc_{start_epoch}.pt")
+            pix_dec_path = os.path.join(self.qmul_save, f"pix_dec_{start_epoch}.pt")
             self.seq_enc.load_state_dict(torch.load(seq_enc_path))
             self.seq_dec.load_state_dict(torch.load(seq_dec_path))
             self.pix_enc.load_state_dict(torch.load(pix_enc_path))
@@ -311,48 +441,64 @@ class Model():
         self.pix_dec_optim = optim.Adam(self.pix_dec.parameters(), self.lr)
         
 
-    def quick_draw_train(self, dataloader, epoch, writer):
-        self.Nmax = dataloader.Nmax
+    def quick_draw_train(self, dataloader, epoch, Nmax, writer):
+        self.Nmax = Nmax
         self.seq_dec.Nmax = self.Nmax
         
         self.seq_enc.train()
         self.seq_dec.train()
 
-        batch, lengths = dataloader.get_batch(self.batch_size)
+        loss_total = 0
+        LKL_total = 0
+        LR_total = 0
+        total_size = len(dataloader)
+        for sketches, lengths, target in tqdm(dataloader):
+            batch = sketches
+            mask, dx, dy, p = target
+            batch = batch.to(self.device); lengths = lengths.to(self.device)
+            mask = mask.to(self.device); dx = dx.to(self.device); dy = dy.to(self.device); p = p.to(self.device)
 
-        z, self.mu, self.sigma = self.seq_enc(batch, self.batch_size)
+            batch = batch.permute((1, 0, 2))
+            mask = mask.permute((1, 0))
+            dx = dx.permute((1, 0, 2))
+            dy = dy.permute((1, 0, 2))
+            p = p.permute((1, 0, 2))
 
-        sos = Variable(torch.stack([torch.Tensor([0, 0, 1, 0, 0])] * self.batch_size).to(self.device)).unsqueeze(0)
-        batch_init = torch.cat([sos, batch], 0)
-        z_stack = torch.stack([z] * (self.Nmax + 1))
-        inputs = torch.cat([batch_init, z_stack], 2)
+            z, self.mu, self.sigma = self.seq_enc(batch, self.batch_size)
 
-        self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, self.rho_xy, self.q, _, _ = self.seq_dec(inputs, z, self.batch_size)
-        mask, dx, dy, p = dataloader.get_target(batch,lengths)
+            sos = Variable(torch.stack([torch.Tensor([0, 0, 1, 0, 0])] * self.batch_size).to(self.device)).unsqueeze(0)
+            batch_init = torch.cat([sos, batch], 0)
+            z_stack = torch.stack([z] * (self.Nmax + 1))
+            inputs = torch.cat([batch_init, z_stack], 2)
+            self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, self.rho_xy, self.q, _, _ = self.seq_dec(inputs, z, self.batch_size)
 
-        self.seq_enc_optim.zero_grad()
-        self.seq_dec_optim.zero_grad()
+            LKL = self.kullback_leibler_loss()
+            LR = self.reconstruction_loss(mask, dx, dy, p)
+            loss = LR + LKL
 
-        self.eta_step = 1 - (1 - self.eta_step) * self.R
+            self.seq_enc_optim.zero_grad()
+            self.seq_dec_optim.zero_grad()
 
-        LKL = self.kullback_leibler_loss()
-        LR = self.reconstruction_loss(mask, dx, dy, p)
-        loss = LR + LKL
+            loss.backward()
 
+            nn.utils.clip_grad_norm_(self.seq_enc.parameters(), self.grad_clip)
+            nn.utils.clip_grad_norm_(self.seq_dec.parameters(), self.grad_clip)
+
+            self.seq_enc_optim.step()
+            self.seq_dec_optim.step()
+
+            self.seq_enc_optim = self.lr_decay(self.seq_enc_optim)
+            self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
+            self.eta_step = 1 - (1 - self.eta_step) * self.R
+
+            loss_total += loss / total_size
+            LKL_total  += LKL / total_size
+            LR_total   += LR / total_size
+
+        # log losses
         writer.add_scalar("QuickDraw/Total/Loss", loss, epoch)
         writer.add_scalar("QuickDraw/KL/s2s", LKL, epoch)
         writer.add_scalar("QuickDraw/Reconstruction/s2s", LR, epoch)
-
-        loss.backward()
-
-        nn.utils.clip_grad_norm_(self.seq_enc.parameters(), self.grad_clip)
-        nn.utils.clip_grad_norm_(self.seq_dec.parameters(), self.grad_clip)
-
-        self.seq_enc_optim.step()
-        self.seq_dec_optim.step()
-
-        self.seq_enc_optim = self.lr_decay(self.seq_enc_optim)
-        self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
 
         if epoch % self.quick_draw_save_iter == 0:
             seq_enc_name = f"seq_enc_{epoch}.pt"
@@ -376,8 +522,8 @@ class Model():
         # Can sample images and vary temp to get more varied output
         
 
-    def qmul_train(self, dataloader, epoch, writer):
-        self.Nmax = dataloader.Nmax
+    def qmul_train(self, dataloader, epoch, Nmax, writer):
+        self.Nmax = Nmax
         self.seq_dec.Nmax = self.Nmax
         
         self.seq_enc.train()
@@ -385,89 +531,120 @@ class Model():
         self.pix_enc.train()
         self.pix_dec.train()
 
-        batch, lengths, batch_images = dataloader.get_batch(self.batch_size)
+        # batch, lengths, batch_images = dataloader.get_batch(self.batch_size)
         
-        # seq2seq
-        z, self.mu, self.sigma = self.seq_enc(batch, self.batch_size)
-        sos = Variable(torch.stack([torch.Tensor([0, 0, 1, 0, 0])] * self.batch_size).to(self.device)).unsqueeze(0)
-        batch_init = torch.cat([sos, batch], 0)
-        z_stack = torch.stack([z] * (self.Nmax + 1))
-        inputs = torch.cat([batch_init, z_stack], 2)
+        loss_total = 0
+        L_s2s_KL_total = 0
+        L_p2p_KL_total = 0
+        L_s2p_KL_total = 0
+        L_p2s_KL_total = 0
+        L_s2s_R_total = 0
+        L_p2p_R_total = 0
+        L_s2p_R_total = 0
+        L_p2s_R_total = 0
+        total_size = len(dataloader)
+        for sketches, lengths, batch_images, target in tqdm(dataloader):
+            batch = sketches
+            mask, dx, dy, p = target
+            batch = batch.to(self.device); lengths = lengths.to(self.device)
+            batch_images = batch_images.to(self.device)
+            mask = mask.to(self.device); dx = dx.to(self.device); dy = dy.to(self.device); p = p.to(self.device)
 
-        self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, self.rho_xy, self.q, _, _ = self.seq_dec(inputs, z, self.batch_size)
-        mask, dx, dy, p = dataloader.get_target(batch,lengths)
-        
-        L_s2s_KL = self.kullback_leibler_loss()
-        L_s2s_R = self.reconstruction_loss(mask, dx, dy, p)
+            batch = batch.permute((1, 0, 2))
+            mask = mask.permute((1, 0))
+            dx = dx.permute((1, 0, 2))
+            dy = dy.permute((1, 0, 2))
+            p = p.permute((1, 0, 2))
 
-        # pix2pix
-        z, self.mu, self.sigma = self.pix_enc(batch_images)
-        pred_imgs = self.pix_dec(z)
-        
-        L_p2p_KL = self.kullback_leibler_loss()
-        L_p2p_R = F.mse_loss(pred_imgs, batch_images)
-        
-        # seq2pix
-        z, self.mu, self.sigma = self.seq_enc(batch, self.batch_size)
-        pred_imgs = self.pix_dec(z)
-        
-        L_s2p_KL = self.kullback_leibler_loss()
-        L_s2p_R = F.mse_loss(pred_imgs, batch_images)
-        
-        # pix2seq
-        z, self.mu, self.sigma = self.pix_enc(batch_images)
-        
-        sos = Variable(torch.stack([torch.Tensor([0, 0, 1, 0, 0])] * self.batch_size).to(self.device)).unsqueeze(0)
-        batch_init = torch.cat([sos, batch], 0)
-        z_stack = torch.stack([z] * (self.Nmax + 1))
-        inputs = torch.cat([batch_init, z_stack], 2)
+            # pix2seq
+            z, self.mu, self.sigma = self.pix_enc(batch_images)
+            
+            sos = Variable(torch.stack([torch.Tensor([0, 0, 1, 0, 0])] * self.batch_size).to(self.device)).unsqueeze(0)
+            batch_init = torch.cat([sos, batch], 0)
+            z_stack = torch.stack([z] * (self.Nmax + 1))
+            inputs = torch.cat([batch_init, z_stack], 2)
 
-        self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, self.rho_xy, self.q, _, _ = self.seq_dec(inputs, z, self.batch_size)
-        mask, dx, dy, p = dataloader.get_target(batch,lengths)
-        
-        L_p2s_KL = self.kullback_leibler_loss()
-        L_p2s_R = self.reconstruction_loss(mask, dx, dy, p)
+            self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, self.rho_xy, self.q, _, _ = self.seq_dec(inputs, z, self.batch_size)
 
-        self.seq_enc_optim.zero_grad()
-        self.seq_dec_optim.zero_grad()
-        self.pix_enc_optim.zero_grad()
-        self.pix_dec_optim.zero_grad()
+            L_p2s_KL = self.kullback_leibler_loss()
+            L_p2s_R = self.reconstruction_loss(mask, dx, dy, p)
 
-        self.eta_step = 1 - (1 - self.eta_step) * self.R
+            # seq2pix
+            z, self.mu, self.sigma = self.seq_enc(batch, self.batch_size)
+            pred_imgs = self.pix_dec(z)
+            
+            L_s2p_KL = self.kullback_leibler_loss()
+            L_s2p_R = F.mse_loss(pred_imgs, batch_images)
 
-        L_KL = L_s2s_KL + L_p2p_KL + L_s2p_KL + L_p2s_KL
-        L_shortcut = L_s2s_R + L_p2p_R
-        L_Reconstruction = L_s2p_R + L_p2s_R
-        loss = L_Reconstruction + L_shortcut + L_KL
+            # pix2pix
+            z, self.mu, self.sigma = self.pix_enc(batch_images)
+            pred_imgs = self.pix_dec(z)
+            
+            L_p2p_KL = self.kullback_leibler_loss()
+            L_p2p_R = F.mse_loss(pred_imgs, batch_images)
+            
+            # seq2seq
+            z, self.mu, self.sigma = self.seq_enc(batch, self.batch_size)
+            sos = Variable(torch.stack([torch.Tensor([0, 0, 1, 0, 0])] * self.batch_size).to(self.device)).unsqueeze(0)
+            batch_init = torch.cat([sos, batch], 0)
+            z_stack = torch.stack([z] * (self.Nmax + 1))
+            inputs = torch.cat([batch_init, z_stack], 2)
 
-        writer.add_scalar("QMUL/Total/Loss", loss, epoch)
-        writer.add_scalar("QMUL/KL/s2s", L_s2s_KL, epoch)
-        writer.add_scalar("QMUL/KL/p2p", L_p2p_KL, epoch)
-        writer.add_scalar("QMUL/KL/s2p", L_s2p_KL, epoch)
-        writer.add_scalar("QMUL/KL/p2s", L_p2s_KL, epoch)
-        writer.add_scalar("QMUL/Reconstruction/s2s", L_s2s_R, epoch)
-        writer.add_scalar("QMUL/Reconstruction/p2p", L_p2p_R, epoch)
-        writer.add_scalar("QMUL/Reconstruction/s2p", L_s2p_R, epoch)
-        writer.add_scalar("QMUL/Reconstruction/p2s", L_p2s_R, epoch)
-        writer.add_scalar("QMUL/KL_weigth", self.wKL * self.eta_step, epoch)
-        writer.add_scalar("QMUL/Learning Rate", self.lr, epoch)
-        
-        loss.backward()
+            self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, self.rho_xy, self.q, _, _ = self.seq_dec(inputs, z, self.batch_size)
+            
+            L_s2s_KL = self.kullback_leibler_loss()
+            L_s2s_R = self.reconstruction_loss(mask, dx, dy, p)
 
-        nn.utils.clip_grad_norm_(self.seq_enc.parameters(), self.grad_clip)
-        nn.utils.clip_grad_norm_(self.seq_dec.parameters(), self.grad_clip)
+            L_KL = L_s2s_KL + L_p2p_KL + L_s2p_KL + L_p2s_KL
+            L_shortcut = L_s2s_R + L_p2p_R
+            L_Reconstruction = L_s2p_R + L_p2s_R
+            loss = L_Reconstruction + L_shortcut + L_KL
 
-        self.seq_enc_optim.step()
-        self.seq_dec_optim.step()
-        self.pix_enc_optim.step()
-        self.pix_dec_optim.step()
+            self.seq_enc_optim.zero_grad()
+            self.seq_dec_optim.zero_grad()
+            self.pix_enc_optim.zero_grad()
+            self.pix_dec_optim.zero_grad()
+            
+            loss.backward()
 
+            nn.utils.clip_grad_norm_(self.seq_enc.parameters(), self.grad_clip)
+            nn.utils.clip_grad_norm_(self.seq_dec.parameters(), self.grad_clip)
+
+            self.seq_enc_optim.step()
+            self.seq_dec_optim.step()
+            self.pix_enc_optim.step()
+            self.pix_dec_optim.step()
+
+            loss_total += loss / total_size
+            L_s2s_KL_total += L_s2s_KL / total_size
+            L_p2p_KL_total += L_p2p_KL / total_size
+            L_s2p_KL_total += L_s2p_KL / total_size
+            L_p2s_KL_total += L_p2p_KL / total_size
+            L_s2s_R_total += L_s2s_R / total_size
+            L_p2p_R_total += L_p2p_R / total_size
+            L_s2p_R_total += L_s2p_R / total_size
+            L_p2s_R_total += L_p2s_R / total_size
+    
         self.seq_enc_optim = self.lr_decay(self.seq_enc_optim)
         self.seq_dec_optim = self.lr_decay(self.seq_dec_optim)
         self.pix_enc_optim = self.lr_decay(self.pix_enc_optim)
         self.pix_dec_optim = self.lr_decay(self.pix_dec_optim)
         if self.lr > self.min_lr:
             self.lr *= self._lr_decay
+        self.eta_step = 1 - (1 - self.eta_step) * self.R
+        
+        # log losses
+        writer.add_scalar("QMUL/Total/Loss", loss_total, epoch)
+        writer.add_scalar("QMUL/KL/s2s", L_s2s_KL_total, epoch)
+        writer.add_scalar("QMUL/KL/p2p", L_p2p_KL_total, epoch)
+        writer.add_scalar("QMUL/KL/s2p", L_s2p_KL_total, epoch)
+        writer.add_scalar("QMUL/KL/p2s", L_p2s_KL_total, epoch)
+        writer.add_scalar("QMUL/Reconstruction/s2s", L_s2s_R_total, epoch)
+        writer.add_scalar("QMUL/Reconstruction/p2p", L_p2p_R_total, epoch)
+        writer.add_scalar("QMUL/Reconstruction/s2p", L_s2p_R_total, epoch)
+        writer.add_scalar("QMUL/Reconstruction/p2s", L_p2s_R_total, epoch)
+        writer.add_scalar("QMUL/KL_weigth", self.wKL * self.eta_step, epoch)
+        writer.add_scalar("QMUL/Learning Rate", self.lr, epoch)
         
         if epoch % self.qmul_save_iter == 0:
             seq_enc_name = f"seq_enc_{epoch}.pt"
@@ -514,6 +691,6 @@ class Model():
         return LS + LP
 
     def kullback_leibler_loss(self):
-        LKL = -0.5 * torch.sum(1 + self.sigma - self.mu ** 2 - torch.exp(self.sigma))/ float(self.Nz * self.batch_size)
+        LKL = -0.5 * torch.mean(1 + self.sigma - torch.square(self.mu) - torch.exp(self.sigma))
         KL_min = Variable(torch.Tensor([self.KL_min]).to(self.device)).detach()
         return self.wKL * self.eta_step * torch.max(LKL, KL_min)
