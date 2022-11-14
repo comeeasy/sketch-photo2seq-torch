@@ -70,7 +70,7 @@ class QuickDrawLoader():
             lengths.append(len(seq[:, 0]))  # Record the length of the actual sequence
             strokes.append(new_seq)  # Record the sequence
 
-        batch = Variable(torch.from_numpy(np.stack(strokes, 1)).to(self.device).float())
+        batch = Variable(torch.from_numpy(np.stack(strokes, 1)).float())
 
         return batch, lengths
 
