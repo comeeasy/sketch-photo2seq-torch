@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+# import torch.nn as nn
 import torchvision.transforms as transforms
 
 from torch.utils.data import Dataset
@@ -10,7 +10,50 @@ import h5py
 import os
 
 from PIL import Image
+from svgpathtools import svg2paths
+import glob
+import re
 
+
+
+class SketchDataset(Dataset):
+    def __init__(self, config) -> None:
+        super().__init__()
+        
+        self.max_seq_length = config.hypers["max_seq_length"]
+        self.M = config.hypers["M"]
+        self.device = config.device
+    
+    def purify(self, strokes):
+        data = []
+        for seq in strokes:
+            if len(seq[:, 0]) <= self.max_seq_length and len(seq[:, 0]) > 10:
+                seq = np.minimum(seq, 1000)
+            seq = np.maximum(seq, -1000)
+            seq = np.array(seq, dtype = np.float32)
+            data.append(seq)
+        return data
+    def calculate_normalizing_scale_factor(self, strokes):
+        """Calculate the normalizing factor explained in appendix of sketch-rnn."""
+        data = []
+        for i in range(len(strokes)):
+            for j in range(len(strokes[i])):
+                data.append(strokes[i][j, 0])
+                data.append(strokes[i][j, 1])
+        data = np.array(data)
+        return np.std(data)
+    def normalize(self, strokes):
+        """Normalize entire dataset (delta_x, delta_y) by the scaling factor."""
+        data = []
+        scale_factor = self.calculate_normalizing_scale_factor(self,strokes)
+        for seq in strokes:
+            seq[:, 0:2] /= scale_factor
+            data.append(seq)
+        return data
+    def max_size(self, strokes):
+        """larger sequence length in the data set"""
+        sizes = [len(seq) for seq in strokes]
+        return max(sizes)
 
 
 class QuickDrawDataset(Dataset):
@@ -234,3 +277,44 @@ class QMULDataset(Dataset):
         p = torch.stack([p1, p2, p3], 1)
         
         return stroke, length, tensor_img, (mask, dx, dy, p) 
+    
+    
+class PortraitDataset(SketchDataset):
+    def __init__(self, config) -> None:
+        super().__init__(config)
+        
+        data = self.svg_dir2npy_data("./datasets/Portrait/rough")
+        
+        
+    def svg_dir2npy_data(svg_path):
+        p = re.compile(r"[ML]+ \d*[.]*\d*,\d*[.]*\d*")
+        
+        svg_files = glob.glob(os.path.join(svg_path, "*.svg"))
+        for line_svg in svg_files:
+            paths, attributes = svg2paths(line_svg)
+            abs_dset = []
+            for att in attributes:
+                attr = att['d']
+                pen_movements = p.findall(attr)
+                for pen_move in pen_movements:
+                    pen_s = pen_move.split(" ")[0]
+                    if pen_s == "M": pen_state = 1.
+                    elif pen_s == "L": pen_state = 0.
+                    else: raise RuntimeError(f"pen_s: {pen_s}")
+                    abs_x, abs_y = map(float, pen_move.split(" ")[1].split(","))
+                    abs_dset.append(np.array((abs_x, abs_y, pen_state)))
+
+            dset = []
+            dset.append(abs_dset[0])
+            for i in range(1, len(abs_dset)):
+                delta_x = abs_dset[i][0] - abs_dset[i-1][0]
+                delta_y = abs_dset[i][1] - abs_dset[i-1][1]
+                pen_state = abs_dset[i][2]
+                
+                dset.append((delta_x, delta_y, pen_state))
+
+        draw = np.array(dset)
+        return draw
+            
+            
+            
