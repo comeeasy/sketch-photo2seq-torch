@@ -60,6 +60,8 @@ def draw_strokes(data, factor=0.2, svg_filename='./tmp/sketch_rnn/svg/sample.svg
     p = "M%s,%s " % (abs_x, abs_y)
     command = "m"
     for i in range(len(data)):
+        lift_pen = data[i, 2] 
+        
         if (lift_pen == 1):
             command = "m"
         elif (command != "l"):
@@ -68,7 +70,6 @@ def draw_strokes(data, factor=0.2, svg_filename='./tmp/sketch_rnn/svg/sample.svg
             command = ""
         x = float(data[i,0])/factor
         y = float(data[i,1])/factor
-        lift_pen = data[i, 2]
         p += command+str(x)+","+str(y)+" "
     the_color = "black"
     stroke_width = 1
