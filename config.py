@@ -10,5 +10,8 @@ class Config():
         self.data = config["data"]
         self.train = config["train"]
         
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if config["device"]:
+            self.device = config["device"]
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
