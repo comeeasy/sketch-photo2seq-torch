@@ -1,28 +1,26 @@
+import glob
+import logging
+import os
+import re
+
+import h5py
+import numpy as np
 import torch
 # import torch.nn as nn
 import torchvision.transforms as transforms
-
-from torch.utils.data import Dataset
-from torch.autograd import Variable
-
-import numpy as np
-import h5py
-import os
-
 from PIL import Image
 from svgpathtools import svg2paths
-import glob
-import re
-
+from torch.autograd import Variable
+from torch.utils.data import Dataset
 
 
 class SketchDataset(Dataset):
     def __init__(self, config) -> None:
         super().__init__()
         
-        self.max_seq_length = config.hypers["max_seq_length"]
-        self.M = config.hypers["M"]
-        self.device = config.device
+        self.max_seq_length = config["hypers"]["max_seq_length"]
+        self.M = config["hypers"]["M"]
+        self.device = config["device"]
     
     def purify(self, strokes):
         data = []
@@ -45,7 +43,7 @@ class SketchDataset(Dataset):
     def normalize(self, strokes):
         """Normalize entire dataset (delta_x, delta_y) by the scaling factor."""
         data = []
-        scale_factor = self.calculate_normalizing_scale_factor(self,strokes)
+        scale_factor = self.calculate_normalizing_scale_factor(strokes)
         for seq in strokes:
             seq[:, 0:2] /= scale_factor
             data.append(seq)
@@ -65,10 +63,10 @@ class QuickDrawDataset(Dataset):
         """
         super().__init__()
         
-        self.max_seq_length = config.hypers["max_seq_length"]
-        self.M = config.hypers["M"]
-        self.datafile = config.data["quick_draw"]
-        self.device = config.device
+        self.max_seq_length = config["hypers"]["max_seq_length"]
+        self.M = config["hypers"]["M"]
+        self.datafile = config["data"]["quick_draw"]
+        self.device = config["device"]
         
         def purify(self, strokes):
             data = []
@@ -101,11 +99,12 @@ class QuickDrawDataset(Dataset):
             sizes = [len(seq) for seq in strokes]
             return max(sizes)
         
-        self.data = np.load(self.datafile, encoding = 'latin1', allow_pickle=True)        
+        self.data = np.load(self.datafile, encoding = 'latin1', allow_pickle=True) 
         self.data = self.data['train']
         self.data = purify(self, self.data)
         self.data = normalize(self, self.data)
         self.Nmax = max_size(self, self.data)
+        print(f"Nmax: {self.Nmax}")
     
     def __len__(self):
         return len(self.data)
@@ -149,16 +148,16 @@ class QMULDataset(Dataset):
     def __init__(self, config, train=True):
         super().__init__()
         
-        self.max_seq_length = config.hypers["max_seq_length"]
+        self.max_seq_length = config["hypers"]["max_seq_length"]
         
         if train: self.datafile = config.data["qmul_train"]
         else    : self.datafile = config.data["qmul_test"]
             
-        self.M = config.hypers["M"]
-        self.device = config.device
+        self.M = config["hypers"]["M"]
+        self.device = config["device"]
         self.qmul_image_path = os.path.join("datasets", "QMUL", "shoes", "photos")
-        self.img_size = config.hypers["img_size"]
-        self.img_crop = config.hypers["img_crop"]
+        self.img_size = config["hypers"]["img_size"]
+        self.img_crop = config["hypers"]["img_crop"]
 
         def purify(self, strokes):
             data = []
@@ -236,13 +235,6 @@ class QMULDataset(Dataset):
         return len(self.data)
         
     def __getitem__(self, index):
-        # image = self.images[index]
-        # if self.transforms:
-        #     image = self.transforms(image)
-        
-        # stroke = self.strokes[index]
-        # return image, torch.from_numpy(stroke)
-        
         image_base_name = self.image_base_name[index]
         image_name = image_base_name[0].decode("utf-8") + ".png"
         img_path = os.path.join(self.qmul_image_path, image_name)
@@ -280,18 +272,106 @@ class QMULDataset(Dataset):
     
     
 class PortraitDataset(SketchDataset):
+    """
+        It returns as below
+        
+    """
+    
     def __init__(self, config) -> None:
         super().__init__(config)
+        self.config = config
         
-        data = self.svg_dir2npy_data("./datasets/Portrait/rough")
+        # np.array data
+        fname = config["data"]["portrait_npy"]
+        print(f"load npy file in {fname}")
+        self.data = self._load_npy(fname)
+        self.data = self.normalize(self.data)
+        self.Nmax = self.max_size(self.data)
+        self.images = self._load_pil(config["data"]["portrait_png"])
+
+        # each number of datasets are must be same
+        print(f"svg: {len(self.data)} png: {len(self.images)}")
+        assert len(self.data) == len(self.images)
+
+        # transforms
+        self.img_size = config["hypers"]["img_size"]
+        self.img_crop = config["hypers"]["img_crop"]
+        mean, std = [[0.5] for _ in range(config["hypers"]["in_channels"])], [[0.5] for _ in range(config["hypers"]["in_channels"])]
+        self.transforms = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize((self.img_size, self.img_size)),
+            transforms.CenterCrop((self.img_crop, self.img_crop)),
+            transforms.Normalize(mean, std),
+        ])
+
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        img = self.images[index]
+        img = self.transforms(img)
         
+        stroke = self.data[index]
+                
+        len_seq = len(stroke)
+        new_seq = np.zeros((self.Nmax, 5))
+        new_seq[:len_seq, :2] = stroke[:, :2]  # fill in x:y co-ords in first two dims
+        new_seq[:len_seq - 1, 2] = 1 - stroke[:-1, 2]  # inverse of pen binary up to second-to-last point in third dim
+        new_seq[:len_seq, 3] = stroke[:, 2]  # pen binary in fourth dim
+        new_seq[(len_seq - 1):, 4] = 1  # ones from second-to-last point to end of max length in fifth dim
+        new_seq[len_seq - 1, 2:4] = 0
         
-    def svg_dir2npy_data(svg_path):
+        stroke = torch.from_numpy(new_seq).float()
+        length = len_seq
+    
+        eos = Variable(torch.stack([torch.Tensor([0, 0, 0, 0, 1])]))
+        stroke_target = torch.cat([stroke, eos], 0)
+        mask = torch.zeros(self.Nmax + 1)
+        
+        mask[:length] = 1
+        mask = Variable(mask).detach()
+    
+        dx = torch.stack([Variable(stroke_target[:, 0])] * self.M, 1).detach()
+        dy = torch.stack([Variable(stroke_target[:, 1])] * self.M, 1).detach()
+        p1 = Variable(stroke_target[:, 2]).detach()
+        p2 = Variable(stroke_target[:, 3]).detach()
+        p3 = Variable(stroke_target[:, 4]).detach()
+        p = torch.stack([p1, p2, p3], 1)
+        
+        return stroke, length, img, (mask, dx, dy, p) 
+        
+    
+    def _load_pil(self, png_path):
+        png_files = sorted(glob.glob(os.path.join(png_path, "*.png")), key=lambda x: list(map(int, re.findall(r"\d+", x)))[0])
+        
+        pil_imgs = []
+        for png_file in png_files:
+            if self.config["hypers"]["in_channels"] == 1:
+                pil_imgs.append(Image.open(png_file).convert('L'))
+            elif self.config["hypers"]["in_channels"] == 3:
+                pil_imgs.append(Image.open(png_file).convert('RGB'))
+        return pil_imgs
+    
+    def _load_npy(self, fname):
+        data = np.load(fname, allow_pickle=True)
+        return np.array([d["strokes"][0] for d in data[:, 1]])
+            
+    def _svg_dir2npy_data(self, svg_path) -> np.array:
+        '''
+            svg files are preprocessed with code that https://github.com/UmarSpa/PNG-to-SVG
+            and bèzier curve to line segments (custom code)
+        '''
+        
         p = re.compile(r"[ML]+ \d*[.]*\d*,\d*[.]*\d*")
         
-        svg_files = glob.glob(os.path.join(svg_path, "*.svg"))
+        svg_files = sorted(glob.glob(os.path.join(svg_path, "*.svg")), key=lambda x: list(map(int, re.findall(r"\d+", x)))[0])
+        
+        print(len(svg_files))
+        print(svg_files)
+        
+        dset = []
         for line_svg in svg_files:
-            paths, attributes = svg2paths(line_svg)
+            _, attributes = svg2paths(line_svg)
             abs_dset = []
             for att in attributes:
                 attr = att['d']
@@ -304,17 +384,18 @@ class PortraitDataset(SketchDataset):
                     abs_x, abs_y = map(float, pen_move.split(" ")[1].split(","))
                     abs_dset.append(np.array((abs_x, abs_y, pen_state)))
 
-            dset = []
-            dset.append(abs_dset[0])
+            strokes = []
+            strokes.append(abs_dset[0])
             for i in range(1, len(abs_dset)):
                 delta_x = abs_dset[i][0] - abs_dset[i-1][0]
                 delta_y = abs_dset[i][1] - abs_dset[i-1][1]
                 pen_state = abs_dset[i][2]
                 
-                dset.append((delta_x, delta_y, pen_state))
+                strokes.append((delta_x, delta_y, pen_state))
+            
+            dset.append(np.array(strokes))
 
-        draw = np.array(dset)
-        return draw
+        return dset
             
             
             

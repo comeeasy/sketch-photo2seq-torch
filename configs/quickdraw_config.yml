@@ -1,0 +1,49 @@
+hypers:
+  encoder_hidden_size: 256
+  decoder_hidden_size: 512
+  num_layers: 1
+  Nz: 128
+  dropout: 0.9
+  M: 20
+  max_seq_length: 131
+  lr: 0.0001
+  eta_min: 0.01
+  batch_size: 512
+  R: 0.95
+  KL_min: 0.2
+  wKL: 1.
+  lr_decay: 0.9999
+  min_lr: 0.00001
+  grad_clip: 1.
+  in_channels: 1
+  img_size: 256
+  img_crop: 224
+  pix_enc_hdims:
+    - 32
+    - 64
+    - 128
+    - 256
+    - 256
+  pix_dec_hdims:
+    - 256
+    - 256
+    - 128
+    - 64
+    - 32
+data:
+  quick_draw: "/home/joono/media/MinLab/sketch-photo2seq-torch/datasets/QuickDraw/shoes/npz/shoe.npz"
+  qmul_train: 
+  qmul_test : 
+  portrait_npy: 
+  portrait_png: 
+
+train:
+  quickdraw:
+    epochs: 100
+    save_iter: 5
+    weights_save: "./weights/quickdraw_config"
+    resume: False
+    start_epoch: 300        # e.g.) load weights/QMUL/seq_enc_{start_epoch}.pt
+
+device:
+tensorboard_log: "runs/quickdraw_config"

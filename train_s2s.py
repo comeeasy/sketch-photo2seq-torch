@@ -21,21 +21,11 @@ def get_args():
     
     return parser.parse_args()
 
-def load_weights(dataset_name, attr, model):
-    if dataset_name == "quick_draw":
-        seq_enc_path = os.path.join(attr["weights_save"], f"seq_enc_{attr['start_epoch']}.pt")
-        seq_dec_path = os.path.join(attr["weights_save"], f"seq_dec_{attr['start_epoch']}.pt")
-        model.seq_enc.load_state_dict(torch.load(seq_enc_path))
-        model.seq_dec.load_state_dict(torch.load(seq_dec_path))
-    elif dataset_name == "portrait" or dataset_name == "qmul":
-        seq_enc_path = os.path.join(attr["weights_save"], f"seq_enc_{attr['start_epoch']}.pt")
-        seq_dec_path = os.path.join(attr["weights_save"], f"seq_dec_{attr['start_epoch']}.pt")
-        pix_enc_path = os.path.join(attr["weights_save"], f"pix_enc_{attr['start_epoch']}.pt")
-        pix_dec_path = os.path.join(attr["weights_save"], f"pix_dec_{attr['start_epoch']}.pt")
-        model.seq_enc.load_state_dict(torch.load(seq_enc_path))
-        model.seq_dec.load_state_dict(torch.load(seq_dec_path))
-        model.pix_enc.load_state_dict(torch.load(pix_enc_path))
-        model.pix_dec.load_state_dict(torch.load(pix_dec_path))
+def load_weights(attr, model):
+    seq_enc_path = os.path.join(attr["weights_save"], f"seq_enc_{attr['start_epoch']}.pt")
+    seq_dec_path = os.path.join(attr["weights_save"], f"seq_dec_{attr['start_epoch']}.pt")
+    model.seq_enc.load_state_dict(torch.load(seq_enc_path))
+    model.seq_dec.load_state_dict(torch.load(seq_dec_path))
         
 
 def get_dataloader(config, dataset_name):
@@ -57,17 +47,17 @@ def get_dataloader(config, dataset_name):
             dataset=dset,
             batch_size=config["hypers"]["batch_size"],
             shuffle=True,
-            num_workers=2,
+            num_workers=1,
             drop_last=True,
         )
-    elif dataset_name == "quick_draw":
+    elif dataset_name == "quickdraw":
         dset = QuickDrawDataset(config)
         Nmax = dset.Nmax
         loader = DataLoader(
             dataset=dset,
             batch_size=config["hypers"]["batch_size"],
             shuffle=True,
-            num_workers=1,
+            num_workers=16,
             drop_last=True,
         )
     
@@ -77,24 +67,24 @@ def get_dataloader(config, dataset_name):
 def main():
     args = get_args()
     config = Config(args.config).get_config()
-    tensorboard_log  = os.path.join("./runs_portrait", "detail_eyes", time.strftime('%D/%M', time.localtime()))
+    tensorboard_log  = os.path.join(config["tensorboard_log"], time.strftime('%D/%M', time.localtime()))
+
+    torch.autograd.set_detect_anomaly(True)
 
     model = Model(config)
     with SummaryWriter(tensorboard_log) as writer:
-        
         for dataset_name, attr in config["train"].items():
-            
             if not os.path.isdir(attr["weights_save"]):
                 os.mkdir(attr["weights_save"])
             
             start_epoch = 1
             if attr["resume"]:
                 start_epoch = attr["start_epoch"]
-                load_weights(dataset_name=dataset_name, attr=attr, model=model)
+                load_weights(attr=attr, model=model)
                 
             loader, Nmax = get_dataloader(config=config, dataset_name=dataset_name)
             for epoch in tqdm(range(start_epoch, attr["epochs"] + start_epoch)):
-                model.song_train(attr, loader, epoch, Nmax, writer)
+                model.s2s_train(attr, loader, epoch, Nmax, writer)
                     
 
 if __name__=="__main__":

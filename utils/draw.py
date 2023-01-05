@@ -59,22 +59,35 @@ def draw_strokes(data, factor=0.2, svg_filename='./tmp/sketch_rnn/svg/sample.svg
     abs_y = 25 - min_y
     p = "M%s,%s " % (abs_x, abs_y)
     command = "m"
+    
+    M_cnt = 0
+    L_cnt = 0
+    
     for i in range(len(data)):
-        lift_pen = data[i, 2] 
+        lift_pen = data[i, 2]
         
-        if (lift_pen == 1):
+        if lift_pen > 0.9:
             command = "m"
-        elif (command != "l"):
+            M_cnt += 1
+            
+        elif command != "l":
             command = "l"
+            L_cnt += 1
+            
         else:
-            command = ""
+            command = "l"
+            L_cnt += 1
+        
         x = float(data[i,0])/factor
         y = float(data[i,1])/factor
         p += command+str(x)+","+str(y)+" "
-    the_color = "black"
-    stroke_width = 1
     
+    stroke_width = 1    
+    the_color = "black"
     dwg.add(dwg.path(p).stroke(the_color,stroke_width).fill("none"))
+    
+    print(f"M :{M_cnt}, L: {L_cnt}")
+    
     dwg.save()
     if draw:
         display(SVG(dwg.tostring()))

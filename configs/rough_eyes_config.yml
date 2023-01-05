@@ -1,0 +1,52 @@
+# Data is not preprocessed.
+# Bezier curves are segmented into a line
+
+hypers:
+  encoder_hidden_size: 256
+  decoder_hidden_size: 512
+  num_layers: 1
+  Nz: 128
+  dropout: 0.9
+  M: 20
+  max_seq_length: 110
+  lr: 0.001
+  eta_min: 0.0001
+  batch_size: 512
+  R: 0.95
+  KL_min: 0.2
+  wKL: .5
+  lr_decay: 0.9999
+  min_lr: 0.0001
+  grad_clip: 5.
+  in_channels: 1
+  img_size: 256
+  img_crop: 224
+  pix_enc_hdims:
+    - 32
+    - 64
+    - 128
+    - 256
+    - 256
+  pix_dec_hdims:
+    - 256
+    - 256
+    - 128
+    - 64
+    - 32
+data:
+  quick_draw: 
+  qmul_train: 
+  qmul_test : 
+  portrait_npy: "/home/joono/media/MinLab/sketch-photo2seq-torch/datasets/rough_eyes/npy/rough_eyes.npy"
+  portrait_png: "/home/joono/media/MinLab/sketch-photo2seq-torch/datasets/rough_eyes/png" 
+
+train:
+  portrait:
+    epochs: 10000
+    save_iter: 10
+    weights_save: "./weights/rough_eyes_config"
+    resume: False
+    start_epoch:         # e.g.) load weights/QMUL/seq_enc_{start_epoch}.pt
+
+device:
+tensorboard_log: "runs/rough_eyes_config"
